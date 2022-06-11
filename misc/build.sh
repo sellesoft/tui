@@ -1,0 +1,1 @@
+./misc/tcc/tcc.exe src/main.c 

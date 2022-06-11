@@ -1,0 +1,4 @@
+init
+resize_terminal new size: 202x19
+clear_terminal
+draw_terminal
