@@ -53,6 +53,8 @@ typedef struct Terminal{
 	b32 quit;
 	b32 dirty; //console window needs to be redrawn
 	b32 ascii;
+	
+	u32* buffer;
 
 	Cell* cells;
 	u32 width, height;
@@ -66,6 +68,8 @@ typedef struct Terminal{
 	u32 text_input[256];
 	u32 text_input_count;
 } Terminal;
+
+const u32* termcol_escseq = U"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm";
 
 
 //-////////////////////////////////////////////////////////////////////////////////////////////////
@@ -141,6 +145,7 @@ void clear_terminal(){
 	if(!WriteFile(terminal->out_pipe, CLEAR_CONSOLE, (DWORD)(wcslen(CLEAR_CONSOLE)*sizeof(wchar)), 0, 0)){
 		printlasterr("WriteFile");
 	}
+	memset(terminal->cells, 0, terminal->width*terminal->height*sizeof(Cell));
 }
 
 void draw_terminal(){
@@ -188,12 +193,10 @@ void draw_terminal(){
 	forI(terminal->width*terminal->height){
 		COORD coord = {i%terminal->width, i/terminal->width};
 		SetConsoleCursorPosition(terminal->out_pipe, coord);
-		if(terminal->cells[i].cp == 0){
-			if(!WriteFile(terminal->out_pipe, " ", 1, 0, 0)){
-				printlasterr("WriteFile");
-				return;
-			}
-		}else{
+		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
+			WriteFile(terminal->out_pipe, L"\x1b[48;2;50;155;155m", sizeof(L"\x1b[48;2;50;155;155m"), 0, 0);
+		}
+		if(terminal->cells[i].cp != 0){
 			if(terminal->ascii){
 				Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
 				if(!WriteFile(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
@@ -209,6 +212,9 @@ void draw_terminal(){
 					return;
 				}
 			}
+		}
+		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
+			WriteFile(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
 		}
 	}
 
@@ -263,7 +269,7 @@ int main(int argc, char** argv){
 	}
 
 	SetConsoleMode(terminal->in_pipe, ENABLE_MOUSE_INPUT);
-    //SetConsoleMode(terminal->in_pipe, ENABLE_VIRTUAL_TERMINAL_INPUT);
+    SetConsoleMode(terminal->in_pipe, ENABLE_VIRTUAL_TERMINAL_INPUT);
     SetConsoleMode(terminal->in_pipe, ENABLE_WINDOW_INPUT);
     
 	CONSOLE_SCREEN_BUFFER_INFO csbi; GetConsoleScreenBufferInfo(terminal->out_pipe, &csbi);
@@ -294,10 +300,19 @@ int main(int argc, char** argv){
 		terminal->dirty = 1;
 		INPUT_RECORD records[5] = {0};
 		u32 nread;
-		if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
+		u32 ninputs;
+		if(!GetNumberOfConsoleInputEvents(terminal->in_pipe, &ninputs)){
 			printlasterr("ReadConsoleInput");
 			SetConsoleMode(terminal->in_pipe, restore_console_mode);
 			return 0;
+		}
+
+		if(1||ninputs){
+			if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
+				printlasterr("ReadConsoleInput");
+				SetConsoleMode(terminal->in_pipe, restore_console_mode);
+				return 0;
+			}
 		}
 
 		forI(nread){
