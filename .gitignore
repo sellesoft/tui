@@ -1,0 +1,27 @@
+#extensions
+*.pdb
+*.recipe
+*.obj
+*.idb
+*.o
+*.exe
+*.cppcheck
+*.4coder
+*.spv
+*.cap
+*.rdc
+*.rdbg
+*.tmp
+*.ctm
+*.diagsession
+*.svg
+*.code-workspace
+*.cache
+
+#folders
+.vs/
+.vscode/
+build/
+
+#specific files
+log.txt
