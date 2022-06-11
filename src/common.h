@@ -45,7 +45,7 @@ typedef u32       Flags;
 #define CastFromMember(structName,memberName,ptr) ((structName*)((u8*)(ptr) - OffsetOfMember(structName,memberName)))
 
 typedef struct str{
-	wchar* data;
-	u64    count;
+	u32* data;
+	u64  count;
 } str;
 

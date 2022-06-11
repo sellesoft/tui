@@ -11,6 +11,7 @@
 // @types
 enum{
     Item_Text,
+	Item_Input,
 };
 
 typedef struct Cell{
@@ -22,20 +23,27 @@ typedef struct Cell{
 
 typedef struct Item{
 	u32 x,y ;//local pos in panel
+	u32 sx, sy; //size, only used for some items like Input
 	u32 type;
+	str text;
 }Item;
 
 //panel to be drawn (ui window)
 typedef struct Panel{
 	u32 x0, x1, y0, y1;
-	Item* item;	
+	Item* items;	//stb_arr
+
 } Panel;
 
-typedef struct Text{
+Item* panel_add_item(Panel* p, u32 x, u32 y, u32 sx, u32 sy, u32 type){
 	Item item;
-	str text;
-}Text;
-#define TextFromItem(x) CastFromMember(Text, item, x)
+	item.x = x;
+	item.y = y;
+	item.sx = sx;
+	item.sy = sy;
+	item.type = type;
+	arrput(p->items, item);
+}
 
 //NOTE(delle): everything is done in cells, not pixels or floats
 typedef struct Terminal{
@@ -63,12 +71,12 @@ typedef struct Terminal{
 //-////////////////////////////////////////////////////////////////////////////////////////////////
 // @vars
 PCWSTR CLEAR_CONSOLE = L"\x1b[2J";
-u32 BORDER_H  = (u32)'─';
-u32 BORDER_V  = (u32)'│';
-u32 BORDER_TL = (u32)'┌';
-u32 BORDER_TR = (u32)'┐';
-u32 BORDER_BL = (u32)'└';
-u32 BORDER_BR = (u32)'┘';
+u32 BORDER_H  = 0x2500; //'─'
+u32 BORDER_V  = 0x2502; //'│'
+u32 BORDER_TL = 0x250C; //'┌'
+u32 BORDER_TR = 0x2510; //'┐'
+u32 BORDER_BL = 0x2514; //'└'
+u32 BORDER_BR = 0x2518; //'┘'
 u32 BORDER_H_ASCII  = (u32)'-';
 u32 BORDER_V_ASCII  = (u32)'|';
 u32 BORDER_TL_ASCII = (u32)'+';
@@ -79,6 +87,7 @@ u32 BORDER_BR_ASCII = (u32)'+';
 Terminal* terminal;
 FILE* log_file;
 
+#define Log(fmt, ...) //fprintln(log_file, fmt, ##__VA_ARGS__);
 
 //-////////////////////////////////////////////////////////////////////////////////////////////////
 // @funcs
@@ -93,28 +102,54 @@ void printlasterr(const char* func_name){
 	assert(false);
 }
 
+u32 wchar_from_codepoint(wchar* out, u32 codepoint){
+	u32 advance = 0;
+	if(codepoint < 0x10000){
+		advance = 1;
+		if(out){
+			out[0] = (wchar)codepoint;
+		}
+	}else if(codepoint <= 0x10FFFF){
+		advance = 2;
+		if(out){
+			u64 v = codepoint - 0x10000;
+			out[0] = 0xD800 + (v >> 10);
+			out[1] = 0xDC00 + (v & 0x03FF);
+		}
+	}else{
+		fprintln(log_file, "invalid codepoint: %u", codepoint);
+	}
+	return advance;
+}
+
 void set_cell(u32 x, u32 y, u32 codepoint, u32 bg, u32 fg){
-	fprintln(log_file,"set_cell x: %2u y: %2u cp: '%x'", x, y, codepoint);
+	if(terminal->ascii){
+		Log("set_cell x: %2u y: %2u cp: '%c'", x, y, (char)codepoint);
+	}else{
+		wchar w[3] = {0}; wchar_from_codepoint(w, codepoint);
+		Log("set_cell x: %2u y: %2u cp: '%ls'", x, y, w);
+	}
 	assert(x < terminal->width); assert(y < terminal->height);
-	u32 cell_index = (terminal->height * y) + x;
+	u32 cell_index = (terminal->width * y) + x;
 	terminal->cells[cell_index].cp = codepoint;
 	terminal->cells[cell_index].bg = bg;
 	terminal->cells[cell_index].fg = fg;
 }
 
 void clear_terminal(){
-	fprintln(log_file, "clear_terminal");
+	Log("clear_terminal");
 	if(!WriteFile(terminal->out_pipe, CLEAR_CONSOLE, (DWORD)(wcslen(CLEAR_CONSOLE)*sizeof(wchar)), 0, 0)){
 		printlasterr("WriteFile");
 	}
 }
 
 void draw_terminal(){
-	fprintln(log_file, "draw_terminal");
+	Log("draw_terminal");
 
 	if(terminal->panels){
+		Log("npanels: %i", arrlen(terminal->panels));
 		ForX(panel, terminal->panels){
-			fprintln(log_file,"panel: x0: %u, y0: %u, x1: %u, y1: %u", panel->x0, panel->y0, panel->x1, panel->y1);
+			Log("panel: x0: %u, y0: %u, x1: %u, y1: %u", panel->x0, panel->y0, panel->x1, panel->y1);
 			//draw panel outline
 			set_cell(panel->x0, panel->y0, (terminal->ascii) ? BORDER_TL_ASCII : BORDER_TL, terminal->default_bg, terminal->default_fg);
 			set_cell(panel->x1, panel->y0, (terminal->ascii) ? BORDER_TR_ASCII : BORDER_TR, terminal->default_bg, terminal->default_fg);
@@ -129,31 +164,51 @@ void draw_terminal(){
 				set_cell(panel->x1, i, (terminal->ascii) ? BORDER_V_ASCII : BORDER_V, terminal->default_bg, terminal->default_fg);
 			}
 
+			ForX(item, panel->items){
+				switch(item->type){
+					case Item_Text:{
+						forI(item->text.count){
+							if(item->x+i==panel->x1)break;
+							set_cell(panel->x0+1+item->x+i, panel->y0+1+item->y, item->text.data[i], terminal->default_bg, terminal->default_fg);
+						}
+					}break;
+				}
+			}
 
 		}
 	}
-
-	forI(arrlen(terminal->cells)){
-		COORD coord = {i / terminal->width, i % terminal->width};
+	
+	//set_cell(0,0,'A',terminal->default_bg, terminal->default_fg);
+	//set_cell(5,5,'B',terminal->default_bg, terminal->default_fg);
+	//set_cell(10,10,'C',terminal->default_bg, terminal->default_fg);
+	//set_cell(10,5,'D',terminal->default_bg, terminal->default_fg);
+	//set_cell(5,10,'E',terminal->default_bg, terminal->default_fg);
+	
+	Log("There are %u cells", terminal->width*terminal->height);
+	forI(terminal->width*terminal->height){
+		COORD coord = {i%terminal->width, i/terminal->width};
 		SetConsoleCursorPosition(terminal->out_pipe, coord);
-		
-		//convert u32 to u16
-		wchar wcp[2];
-		u32 advance = 0;
-		if(terminal->cells[i].cp < 0x10000){
-			advance = 1;
-			wcp[0] = (wchar)terminal->cells[i].cp;
-			wcp[1] = 0;
-		}else if(terminal->cells[i].cp <= 0x10FFFF){
-			advance = 2;
-			u64 v = terminal->cells[i].cp - 0x10000;
-			wcp[0] = 0xD800 + (v >> 10);
-			wcp[1] = 0xDC00 + (v & 0x03FF);
-		}
-
-		if(!WriteFile(terminal->out_pipe, wcp, advance, 0, 0)){
-			printlasterr("WriteFile");
-			return;
+		if(terminal->cells[i].cp == 0){
+			if(!WriteFile(terminal->out_pipe, " ", 1, 0, 0)){
+				printlasterr("WriteFile");
+				return;
+			}
+		}else{
+			if(terminal->ascii){
+				Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
+				if(!WriteFile(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
+					printlasterr("WriteFile");
+					return;
+				}
+			}else{
+				//convert u32 to u16
+				wchar wcp[2];
+				u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
+				if(!WriteFile(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
+					printlasterr("WriteFile");
+					return;
+				}
+			}
 		}
 	}
 
@@ -162,8 +217,8 @@ void draw_terminal(){
 }
 
 void resize_terminal(u32 new_width, u32 new_height){
-	fprintln(log_file,"resize_terminal new size: %ux%u", new_width, new_height);
-	Cell* new_cells = calloc(terminal->width*terminal->height, sizeof(Cell));
+	Log("resize_terminal new size: %ux%u", new_width, new_height);
+	Cell* new_cells = calloc(new_width*new_height, sizeof(Cell));
 
 	//readjust positioning of panels
 	
@@ -178,11 +233,13 @@ int main(int argc, char** argv){
 	_setmode(_fileno(stdout), _O_U16TEXT);
 	_setmode(_fileno(stdin),  _O_U16TEXT);
 
+
 	//// init ////
 	log_file = fopen("log.txt", "w+");
-	fprintln(log_file, "init"); fflush(log_file);
+	Log("init");
 
 	terminal = calloc(1, sizeof(Terminal));
+	terminal->ascii = 1;
 	terminal->default_fg = 0xffffffff;
 	terminal->default_bg = 0x00000000;
 	terminal->dirty      = false;
@@ -212,22 +269,29 @@ int main(int argc, char** argv){
 	CONSOLE_SCREEN_BUFFER_INFO csbi; GetConsoleScreenBufferInfo(terminal->out_pipe, &csbi);
 	resize_terminal(csbi.srWindow.Right - csbi.srWindow.Left + 1, csbi.srWindow.Bottom - csbi.srWindow.Top  + 1);
 
+	Panel panel;
+	panel.x0 = 0;
+    panel.x1 = terminal->width - 1;
+    panel.y0 = 0;
+    panel.y1 = terminal->height - 1;
+	arrput(terminal->panels, panel);
+	arrinit(terminal->panels[0].items, 10);
+	Item* item = panel_add_item(terminal->panels,0,0,0,0,Item_Text);
+	str s; 
+	s.data = U"hello";
+	s.count = 5;
+	item->text = s;
+
 	clear_terminal();
 	draw_terminal();
-    fprintln(log_file,"w:%uh:%u", terminal->width, terminal->height);
+	Log("w:%uh:%u", terminal->width, terminal->height);
 	
-	Panel* panel = arraddnptr(terminal->panels, 1);
-	panel->x0 = 0;
-    panel->x1 = terminal->width - 1;
-    panel->y0 = 0;
-    panel->y1 = terminal->height - 1;
-	
-
 	//// update ////
-	fprintln(log_file, "update");
-	fflush(log_file);
+	Log("update");
 	while(!terminal->quit){
-		fprintln(log_file, "---------");
+		Log("---------");
+		item->x = 20*(sin(time(0))+1)/2;
+		terminal->dirty = 1;
 		INPUT_RECORD records[5] = {0};
 		u32 nread;
 		if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
@@ -292,9 +356,8 @@ int main(int argc, char** argv){
 			clear_terminal();
 			draw_terminal();
 		}
-		fflush(log_file);
 	}
-
+	arrlen(terminal->panels);
 	fclose(log_file);
 	SetConsoleMode(terminal->in_pipe, restore_console_mode);
 	return 0;
