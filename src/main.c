@@ -43,6 +43,7 @@ Item* panel_add_item(Panel* p, u32 x, u32 y, u32 sx, u32 sy, u32 type){
 	item.sy = sy;
 	item.type = type;
 	arrput(p->items, item);
+	return p->items + arrlen(p->items);
 }
 
 //NOTE(delle): everything is done in cells, not pixels or floats
@@ -75,7 +76,7 @@ const u32* termcol_escseq = U"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm";
 //-////////////////////////////////////////////////////////////////////////////////////////////////
 // @vars
 PCWSTR CLEAR_CONSOLE = L"\x1b[2J";
-u32 BORDER_H  = 0x2500; //'─'
+u32 BORDER_H  = U'─'; //'─'
 u32 BORDER_V  = 0x2502; //'│'
 u32 BORDER_TL = 0x250C; //'┌'
 u32 BORDER_TR = 0x2510; //'┐'
@@ -148,7 +149,7 @@ void clear_terminal(){
 	memset(terminal->cells, 0, terminal->width*terminal->height*sizeof(Cell));
 }
 
-void draw_terminal(){
+void draw_terminal(){"─"
 	Log("draw_terminal");
 
 	if(terminal->panels){
@@ -194,27 +195,27 @@ void draw_terminal(){
 		COORD coord = {i%terminal->width, i/terminal->width};
 		SetConsoleCursorPosition(terminal->out_pipe, coord);
 		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-			WriteFile(terminal->out_pipe, L"\x1b[48;2;50;155;155m", sizeof(L"\x1b[48;2;50;155;155m"), 0, 0);
+			//WriteConsoleW(terminal->out_pipe, "\x1b[48;2;50;155;155m", sizeof("\x1b[48;2;50;155;155m"), 0, 0);
 		}
 		if(terminal->cells[i].cp != 0){
 			if(terminal->ascii){
 				Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
-				if(!WriteFile(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
-					printlasterr("WriteFile");
+				if(!WriteConsoleA(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
+					printlasterr("WriteConsoleA");
 					return;
 				}
 			}else{
 				//convert u32 to u16
 				wchar wcp[2];
 				u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
-				if(!WriteFile(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
-					printlasterr("WriteFile");
+				if(!WriteConsoleW(terminal->out_pipe, wcp, advance, 0, 0)){
+					printlasterr("WriteConsoleW");
 					return;
 				}
 			}
 		}
 		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-			WriteFile(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
+			//WriteConsoleW(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
 		}
 	}
 
@@ -245,7 +246,7 @@ int main(int argc, char** argv){
 	Log("init");
 
 	terminal = calloc(1, sizeof(Terminal));
-	terminal->ascii = 1;
+	terminal->ascii = 0;
 	terminal->default_fg = 0xffffffff;
 	terminal->default_bg = 0x00000000;
 	terminal->dirty      = false;
