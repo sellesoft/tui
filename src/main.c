@@ -141,7 +141,7 @@ Item* panel_add_item(Panel* p, u32 x, u32 y, u32 sx, u32 sy, u32 type){
 	item.sy = sy;
 	item.type = type;
 	arrput(p->items, item);
-	return p->items + arrlen(p->items);
+	return p->items + arrlen(p->items) - 1;
 }
 
 void set_cell(u32 x, u32 y, u32 codepoint, u32 bg, u32 fg){
@@ -215,17 +215,6 @@ void clear_terminal(){
 
 void draw_terminal(){
 	Log("draw_terminal()");
-
-	// u32* test = U"here is some text to test with";
-	// u32 sz = 30;
-	// u16* outstr = (u16*)malloc(3000);
-	// u16* cursor = outstr;
-	// forI(sz){
-	// 	wchar wcp[2]={0};
-	// 	u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
-	// 	memcpy(cursor, wcp, advance);
-	// 	cursor+=advance;
-	// }
 	if(terminal->panels){
 		Log("npanels: %i", arrlen(terminal->panels));
 		ForX(panel, terminal->panels){
@@ -252,7 +241,6 @@ void draw_terminal(){
 				}
 			}
 
-
 			ForX(item, panel->items){
 				switch(item->type){
 					case Item_Text:{
@@ -266,6 +254,8 @@ void draw_terminal(){
 
 		}
 	}
+	COORD coord = {0,0};
+	SetConsoleCursorPosition(terminal->out_pipe, coord);
 	//malloc enough space for each cell to have a fg and bg color esc seq and a newline escseq at the end of each line
 	u32 outsize = (termcol_escseq_size+sizeof(wchar))*(terminal->height*terminal->width)+termnl_escseq_size*(terminal->height-1);
 	wchar* out = (wchar*)malloc(outsize);
@@ -277,6 +267,12 @@ void draw_terminal(){
 	forI(terminal->width*terminal->height){
 		wchar* chardbg = cur;
 		Cell cell = terminal->cells[i];
+		if(i%terminal->width == terminal->cursor_x && 
+		   i/terminal->width == terminal->cursor_y){
+			u32 save = cell.fg;
+			cell.fg = cell.bg;
+			cell.bg = save;	   
+		}
 		if(lastbg != cell.bg || lastfg != cell.fg){
 			lastbg = cell.bg;
 			lastfg = cell.fg;
@@ -296,13 +292,14 @@ void draw_terminal(){
 			cur+=19;
 			cw = swprintf(temp, 50, 
 				L"%03u;%03u;%03u",
-				(terminal->cells[i].bg&0xff0000)>>16,
-				(terminal->cells[i].bg&0x00ff00)>> 8,
-				(terminal->cells[i].bg&0x0000ff)>> 0
+				(terminal->cells[i].bg&0xff000000)>>24,
+				(terminal->cells[i].bg&0x00ff0000)>>16,
+				(terminal->cells[i].bg&0x0000ff00)>> 8
 			);
 			memcpy(cur, temp, cw*sizeof(wchar));
 			cur+=12;
 		}
+		
 		//write character
 		if(terminal->cells[i].cp == 0){
 			terminal->cells[i].cp = (u32)' ';
@@ -322,49 +319,11 @@ void draw_terminal(){
 		printlasterr(L"WriteConsoleW");
 		return;
 	}
-		
-
-	Log("%ls", out);
-
-
-	// if(!WriteConsoleW(terminal->out_pipe, out, terminal->width*terminal->height,0,0)){
-	// 	printlasterr(L"WriteConsoleW");
-	// 	return;
-	// }
 
 	free(out);
 
-	// Log("There are %u cells", terminal->width*terminal->height);
-	// forI(terminal->width*terminal->height){
-	// 	COORD coord = {i%terminal->width, i/terminal->width};
-	// 	SetConsoleCursorPosition(terminal->out_pipe, coord);
-	// 	if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-	// 		//WriteConsoleW(terminal->out_pipe, "\x1b[48;2;50;155;155m", sizeof("\x1b[48;2;50;155;155m"), 0, 0);
-	// 	}
-	// 	if(terminal->cells[i].cp != 0){
-	// 		if(terminal->ascii){
-	// 			//Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
-	// 			if(!WriteConsoleA(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
-	// 				printlasterr(L"WriteConsoleA");
-	// 				return;
-	// 			}
-	// 		}else{
-	// 			//convert u32 to u16
-	// 			wchar wcp[2];
-	// 			u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
-	// 			//Log("Writing '%x' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
-	// 			if(!WriteConsoleW(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
-	// 				printlasterr(L"WriteConsoleW");
-	// 				return;
-	// 			}
-	// 		}
-	// 	}
-	// 	if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-	// 		//WriteConsoleW(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
-	// 	}
-	// }
-
-	COORD coord = {terminal->cursor_x, terminal->cursor_y};
+	coord.X = terminal->cursor_x;
+	coord.Y = terminal->cursor_y;
 	SetConsoleCursorPosition(terminal->out_pipe, coord);
 }
 
@@ -427,6 +386,9 @@ int main(int argc, char** argv){
 	Panel* p0 = make_panel(0,10,0,10,title);
 	p0->title_align = 0.5;
 	p0->x1 = terminal->width-1;
+	Item* i0 = panel_add_item(p0, 10, 5, 0,0,Item_Text);
+	str text = {U"here is some text", 17};
+	i0->text = text;
 	clear_terminal();
 	draw_terminal();
 	hide_cursor();
@@ -434,6 +396,7 @@ int main(int argc, char** argv){
 	//// update ////
 	Log("update");
 	while(!terminal->quit){
+		Log("%u, %u", terminal->cursor_x, terminal->cursor_y);
 		INPUT_RECORD records[5] = {0};
 		u32 ninputs = 0;
 		if(!GetNumberOfConsoleInputEvents(terminal->in_pipe, &ninputs)){
@@ -448,7 +411,6 @@ int main(int argc, char** argv){
 			SetConsoleMode(terminal->in_pipe, restore_console_mode);
 			return 0;
 		}
-
 		forI(nread){
 			INPUT_RECORD ir = records[i];
 			switch(ir.EventType){
@@ -457,7 +419,7 @@ int main(int argc, char** argv){
 					KEY_EVENT_RECORD rec = ir.Event.KeyEvent;
 					//char c = MapVirtualKeyW(rec.wVirtualKeyCode, MAPVK_VK_TO_CHAR);
 					//fprintln(log_file,"%u", rec.wVirtualKeyCode);
-					
+					terminal->dirty = 1;
 					switch(rec.wVirtualKeyCode){
 						case 'Q':{
 							terminal->quit = true;
