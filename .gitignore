@@ -26,3 +26,4 @@ build/
 #specific files
 log.txt
 misc/shell.bat
+gdbinit

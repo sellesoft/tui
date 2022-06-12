@@ -20,7 +20,6 @@ typedef struct Cell{
 	u32 fg;
 } Cell;
 
-
 typedef struct Item{
 	u32 x,y ;//local pos in panel
 	u32 sx, sy; //size, only used for some items like Input
@@ -32,19 +31,10 @@ typedef struct Item{
 typedef struct Panel{
 	u32 x0, x1, y0, y1;
 	Item* items;	//stb_arr
-
+	str title;
+	f32 title_align; //how the title is aligned, valid values are 0 to 1, default 0 
 } Panel;
 
-Item* panel_add_item(Panel* p, u32 x, u32 y, u32 sx, u32 sy, u32 type){
-	Item item;
-	item.x = x;
-	item.y = y;
-	item.sx = sx;
-	item.sy = sy;
-	item.type = type;
-	arrput(p->items, item);
-	return p->items + arrlen(p->items);
-}
 
 //NOTE(delle): everything is done in cells, not pixels or floats
 typedef struct Terminal{
@@ -124,6 +114,30 @@ u32 wchar_from_codepoint(wchar* out, u32 codepoint){
 		fprintln(log_file, "invalid codepoint: %u", codepoint);
 	}
 	return advance;
+}
+
+Panel* make_panel(u32 x0, u32 x1, u32 y0, u32 y1, str title){
+	Panel panel;
+	panel.x0 = x0;
+    panel.x1 = x1;
+    panel.y0 = y0;
+    panel.y1 = y1;
+	panel.title = title;
+	panel.title_align = 0;
+	arrput(terminal->panels, panel);
+	arrinit(terminal->panels[0].items, 2);
+	return terminal->panels + arrlen(terminal->panels) - 1;
+}
+
+Item* panel_add_item(Panel* p, u32 x, u32 y, u32 sx, u32 sy, u32 type){
+	Item item;
+	item.x = x;
+	item.y = y;
+	item.sx = sx;
+	item.sy = sy;
+	item.type = type;
+	arrput(p->items, item);
+	return p->items + arrlen(p->items);
 }
 
 void set_cell(u32 x, u32 y, u32 codepoint, u32 bg, u32 fg){
@@ -215,6 +229,15 @@ void draw_terminal(){
 				set_cell(panel->x0, i, (terminal->ascii) ? BORDER_V_ASCII : BORDER_V, terminal->default_bg, terminal->default_fg);
 				set_cell(panel->x1, i, (terminal->ascii) ? BORDER_V_ASCII : BORDER_V, terminal->default_bg, terminal->default_fg);
 			}
+			if(panel->title.data){
+				u32 panelw = (panel->x1) - (panel->x0+1);
+				u32 tstart = panel->x0+1 + (u32)ceil(panel->title_align * (panelw-panel->title.count));
+				forI(panel->title.count){
+					if(tstart+i==panel->x1) break;
+					set_cell(tstart+i, panel->y0, panel->title.data[i], terminal->default_bg, terminal->default_fg);
+				}
+			}
+
 
 			ForX(item, panel->items){
 				switch(item->type){
@@ -317,18 +340,10 @@ int main(int argc, char** argv){
     
 	CONSOLE_SCREEN_BUFFER_INFO csbi; GetConsoleScreenBufferInfo(terminal->out_pipe, &csbi);
 	resize_terminal(csbi.srWindow.Right - csbi.srWindow.Left + 1, csbi.srWindow.Bottom - csbi.srWindow.Top  + 1);
-
-	Panel panel;
-	panel.x0 = 0;
-    panel.x1 = terminal->width - 1;
-    panel.y0 = 0;
-    panel.y1 = terminal->height - 1;
-	arrput(terminal->panels, panel);
-	arrinit(terminal->panels[0].items, 10);
-	Item* item = panel_add_item(terminal->panels,0,0,0,0,Item_Text);
-	str s = {U"hello", 5}; 
-	item->text = s;
-
+	str title = {U"tuilib",6};
+	Panel* p0 = make_panel(0,10,0,10,title);
+	p0->title_align = 0.5;
+	p0->x1 = terminal->width-1;
 	clear_terminal();
 	draw_terminal();
 	hide_cursor();
@@ -345,12 +360,10 @@ int main(int argc, char** argv){
 		}
 
 		u32 nread = 0;
-		if(1||ninputs){
-			if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
-				printlasterr(L"ReadConsoleInput");
-				SetConsoleMode(terminal->in_pipe, restore_console_mode);
-				return 0;
-			}
+		if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
+			printlasterr(L"ReadConsoleInput");
+			SetConsoleMode(terminal->in_pipe, restore_console_mode);
+			return 0;
 		}
 
 		forI(nread){
