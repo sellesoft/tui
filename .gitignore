@@ -27,3 +27,4 @@ build/
 log.txt
 misc/shell.bat
 gdbinit
+.gdb_history

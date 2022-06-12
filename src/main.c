@@ -60,7 +60,11 @@ typedef struct Terminal{
 	u32 text_input_count;
 } Terminal;
 
-//const u32* termcol_escseq = U"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm";
+const u16* termcol_escseq = L"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm";
+const u32 termcol_escseq_size = sizeof(L"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm");
+const u16* termnl_escseq = L"\n";//u"\x1b[1E\x1b[0G";
+const u32 termnl_escseq_size = sizeof(L"\n");//sizeof(u"\x1b[1E\x1b[0G");
+
 
 //-////////////////////////////////////////////////////////////////////////////////////////////////
 // @vars
@@ -212,6 +216,16 @@ void clear_terminal(){
 void draw_terminal(){
 	Log("draw_terminal()");
 
+	// u32* test = U"here is some text to test with";
+	// u32 sz = 30;
+	// u16* outstr = (u16*)malloc(3000);
+	// u16* cursor = outstr;
+	// forI(sz){
+	// 	wchar wcp[2]={0};
+	// 	u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
+	// 	memcpy(cursor, wcp, advance);
+	// 	cursor+=advance;
+	// }
 	if(terminal->panels){
 		Log("npanels: %i", arrlen(terminal->panels));
 		ForX(panel, terminal->panels){
@@ -252,36 +266,103 @@ void draw_terminal(){
 
 		}
 	}
-	
-	Log("There are %u cells", terminal->width*terminal->height);
+	//malloc enough space for each cell to have a fg and bg color esc seq and a newline escseq at the end of each line
+	u32 outsize = (termcol_escseq_size+sizeof(wchar))*(terminal->height*terminal->width)+termnl_escseq_size*(terminal->height-1);
+	wchar* out = (wchar*)malloc(outsize);
+	memset(out, 0, outsize);
+	wchar* cur = out;
+	wchar* linestart = cur;
+	u32 lastbg = 0;
+	u32 lastfg = 0;
 	forI(terminal->width*terminal->height){
-		COORD coord = {i%terminal->width, i/terminal->width};
-		SetConsoleCursorPosition(terminal->out_pipe, coord);
-		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-			//WriteConsoleW(terminal->out_pipe, "\x1b[48;2;50;155;155m", sizeof("\x1b[48;2;50;155;155m"), 0, 0);
+		wchar* chardbg = cur;
+		Cell cell = terminal->cells[i];
+		if(lastbg != cell.bg || lastfg != cell.fg){
+			lastbg = cell.bg;
+			lastfg = cell.fg;
+			memcpy(cur, termcol_escseq, termcol_escseq_size);
+			wchar temp[50] = {0};
+			//"\x1b[38;2;xxx;xxx;xxxm\x1b[48;2;xxx;xxx;xxxm";
+			cur+=7;
+			//write foreground
+			u32 cw = swprintf(temp, 50, 
+				L"%03u;%03u;%03u",
+				(terminal->cells[i].fg&0xff0000)>>16,
+				(terminal->cells[i].fg&0x00ff00)>> 8,
+				(terminal->cells[i].fg&0x0000ff)>> 0
+			);
+			memcpy(cur, temp, cw*sizeof(wchar));
+			//write background
+			cur+=19;
+			cw = swprintf(temp, 50, 
+				L"%03u;%03u;%03u",
+				(terminal->cells[i].bg&0xff0000)>>16,
+				(terminal->cells[i].bg&0x00ff00)>> 8,
+				(terminal->cells[i].bg&0x0000ff)>> 0
+			);
+			memcpy(cur, temp, cw*sizeof(wchar));
+			cur+=12;
 		}
-		if(terminal->cells[i].cp != 0){
-			if(terminal->ascii){
-				//Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
-				if(!WriteConsoleA(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
-					printlasterr(L"WriteConsoleA");
-					return;
-				}
-			}else{
-				//convert u32 to u16
-				wchar wcp[2];
-				u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
-				//Log("Writing '%x' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
-				if(!WriteConsoleW(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
-					printlasterr(L"WriteConsoleW");
-					return;
-				}
-			}
+		//write character
+		if(terminal->cells[i].cp == 0){
+			terminal->cells[i].cp = (u32)' ';
 		}
-		if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
-			//WriteConsoleW(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
+		wchar wcp[2]={0};
+		u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
+		memcpy(cur, wcp, sizeof(wchar));
+		cur+=1;
+		//set newline if we are at the end of a line
+		if(i&&(i+1%terminal->width == 0)){
+			memcpy(cur, L"\n", sizeof(L"\n"));
+			cur+=1;
 		}
 	}
+
+	if(!WriteConsoleW(terminal->out_pipe, out, terminal->width*terminal->height,0,0)){
+		printlasterr(L"WriteConsoleW");
+		return;
+	}
+		
+
+	Log("%ls", out);
+
+
+	// if(!WriteConsoleW(terminal->out_pipe, out, terminal->width*terminal->height,0,0)){
+	// 	printlasterr(L"WriteConsoleW");
+	// 	return;
+	// }
+
+	free(out);
+
+	// Log("There are %u cells", terminal->width*terminal->height);
+	// forI(terminal->width*terminal->height){
+	// 	COORD coord = {i%terminal->width, i/terminal->width};
+	// 	SetConsoleCursorPosition(terminal->out_pipe, coord);
+	// 	if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
+	// 		//WriteConsoleW(terminal->out_pipe, "\x1b[48;2;50;155;155m", sizeof("\x1b[48;2;50;155;155m"), 0, 0);
+	// 	}
+	// 	if(terminal->cells[i].cp != 0){
+	// 		if(terminal->ascii){
+	// 			//Log("Writing '%c' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
+	// 			if(!WriteConsoleA(terminal->out_pipe, &terminal->cells[i].cp, 1, 0, 0)){
+	// 				printlasterr(L"WriteConsoleA");
+	// 				return;
+	// 			}
+	// 		}else{
+	// 			//convert u32 to u16
+	// 			wchar wcp[2];
+	// 			u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
+	// 			//Log("Writing '%x' to position x:%i, y:%i", terminal->cells[i].cp, coord.X, coord.Y);
+	// 			if(!WriteConsoleW(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
+	// 				printlasterr(L"WriteConsoleW");
+	// 				return;
+	// 			}
+	// 		}
+	// 	}
+	// 	if(coord.X == terminal->cursor_x && coord.Y == terminal->cursor_y){
+	// 		//WriteConsoleW(terminal->out_pipe, L"\x1b[49m", sizeof(L"\x1b[49m"), 0, 0);
+	// 	}
+	// }
 
 	COORD coord = {terminal->cursor_x, terminal->cursor_y};
 	SetConsoleCursorPosition(terminal->out_pipe, coord);
@@ -304,6 +385,8 @@ int main(int argc, char** argv){
 	_setmode(_fileno(stdin),  _O_U16TEXT);
 
 
+
+
 	//// init ////
 	log_file = fopen("log.txt", "w+");
 	setvbuf(log_file,0,_IONBF,0);
@@ -311,7 +394,7 @@ int main(int argc, char** argv){
 
 	terminal = calloc(1, sizeof(Terminal));
 	terminal->ascii = false;
-	terminal->default_fg = 0xffffffff;
+	terminal->default_fg = 0xaaffaaff;
 	terminal->default_bg = 0x00000000;
 	terminal->dirty      = false;
 	arrinit(terminal->panels, 4);
@@ -352,6 +435,7 @@ int main(int argc, char** argv){
 	Log("update");
 	while(!terminal->quit){
 		INPUT_RECORD records[5] = {0};
+		terminal->dirty = 1;
 		u32 ninputs = 0;
 		if(!GetNumberOfConsoleInputEvents(terminal->in_pipe, &ninputs)){
 			printlasterr(L"ReadConsoleInput");
