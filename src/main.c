@@ -213,12 +213,74 @@ void clear_terminal(){
 	memset(terminal->cells, 0, terminal_size*sizeof(Cell));
 }
 
+//must dealloc yourself
+wchar* cell_string(Cell cell, b32 applycol){
+	wchar* str = (wchar*)malloc(sizeof(wchar)+termcol_escseq_size+20);
+	memset(str, 0, sizeof(wchar)+termcol_escseq_size+20);
+	wchar* cur = str;
+	if(applycol){
+		memcpy(str, termcol_escseq, termcol_escseq_size);
+		wchar temp[50] = {0};
+		cur+=7;
+		//write foreground
+		u32 cw = swprintf(temp, 50, 
+			L"%03u;%03u;%03u",
+			(cell.fg&0xff000000)>>24,
+			(cell.fg&0x00ff0000)>>16,
+			(cell.fg&0x0000ff00)>> 8
+		);
+		memcpy(cur, temp, cw*sizeof(wchar));
+		//write background
+		cur+=19;
+		cw = swprintf(temp, 50, 
+			L"%03u;%03u;%03u",
+			(cell.bg&0xff000000)>>24,
+			(cell.bg&0x00ff0000)>>16,
+			(cell.bg&0x0000ff00)>> 8
+		);
+		memcpy(cur, temp, cw*sizeof(wchar));
+		cur+=12;
+	}
+	//write character
+	wchar wcp[2]={0};
+	u32 advance = wchar_from_codepoint(wcp, cell.cp);
+	memcpy(cur, wcp, sizeof(wchar));
+	cur+=1;
+	return str;
+}
+
+void draw_section(u32 x0, u32 y0, u32 x1, u32 y1){
+	u32 dims = (x1-x0) * (y1-y0);
+	
+	u32 lastfg = 0;
+	u32 lastbg = 0;
+	COORD coord = {x0,y0};
+	forI(dims){
+		Cell c = terminal->cells[terminal->width * coord.Y + coord.X];
+		wchar* s; 
+		b32 nc = 0;
+		if(lastfg!=c.fg||lastbg!=c.bg){
+			lastfg = c.fg; lastbg = c.bg;
+			s = cell_string(c, 1);
+		} else s = cell_string(c, 0);
+
+		SetConsoleCursorPosition(terminal->out_pipe, coord);
+		if(!WriteConsoleW(terminal->out_pipe, s,1,0,0)){
+			printlasterr(L"WriteConsoleW");
+			return;
+		}
+		free(s);
+		if(coord.X==x1) {coord.X=x0; coord.Y++;}
+		else coord.X++;
+	}
+}
+
 void draw_terminal(){
 	Log("draw_terminal()");
 	if(terminal->panels){
 		Log("npanels: %i", arrlen(terminal->panels));
 		ForX(panel, terminal->panels){
-			//Log("panel: x0: %u, y0: %u, x1: %u, y1: %u", panel->x0, panel->y0, panel->x1, panel->y1);
+			Log("panel: x0: %u, y0: %u, x1: %u, y1: %u", panel->x0, panel->y0, panel->x1, panel->y1);
 			//draw panel outline
 			set_cell(panel->x0, panel->y0, (terminal->ascii) ? BORDER_TL_ASCII : BORDER_TL, terminal->default_bg, terminal->default_fg);
 			set_cell(panel->x1, panel->y0, (terminal->ascii) ? BORDER_TR_ASCII : BORDER_TR, terminal->default_bg, terminal->default_fg);
@@ -251,7 +313,7 @@ void draw_terminal(){
 					}break;
 				}
 			}
-
+			//draw_section(panel->x0,panel->y0,panel->x1,panel->y1);
 		}
 	}
 	COORD coord = {0,0};
@@ -320,11 +382,9 @@ void draw_terminal(){
 		return;
 	}
 
-	free(out);
-
-	coord.X = terminal->cursor_x;
-	coord.Y = terminal->cursor_y;
-	SetConsoleCursorPosition(terminal->out_pipe, coord);
+	 free(out);
+	// coord = {terminal->cursor_x, terminal->cursor_y};
+	// SetConsoleCursorPosition(terminal->out_pipe, coord);
 }
 
 void resize_terminal(u32 new_width, u32 new_height){
@@ -342,9 +402,6 @@ int main(int argc, char** argv){
 	//setup unicode support on Win32
 	_setmode(_fileno(stdout), _O_U16TEXT);
 	_setmode(_fileno(stdin),  _O_U16TEXT);
-
-
-
 
 	//// init ////
 	log_file = fopen("log.txt", "w+");
@@ -377,7 +434,7 @@ int main(int argc, char** argv){
 
 	SetConsoleMode(terminal->in_pipe, ENABLE_MOUSE_INPUT);
     SetConsoleMode(terminal->in_pipe, ENABLE_VIRTUAL_TERMINAL_INPUT);
-    SetConsoleMode(terminal->in_pipe, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    //SetConsoleMode(terminal->out_pipe, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     SetConsoleMode(terminal->in_pipe, ENABLE_WINDOW_INPUT);
     
 	CONSOLE_SCREEN_BUFFER_INFO csbi; GetConsoleScreenBufferInfo(terminal->out_pipe, &csbi);
