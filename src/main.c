@@ -208,7 +208,7 @@ void draw_terminal(){"─"
 				//convert u32 to u16
 				wchar wcp[2];
 				u32 advance = wchar_from_codepoint(wcp, terminal->cells[i].cp);
-				if(!WriteConsoleW(terminal->out_pipe, wcp, advance, 0, 0)){
+				if(!WriteConsoleW(terminal->out_pipe, wcp, advance*sizeof(wchar), 0, 0)){
 					printlasterr("WriteConsoleW");
 					return;
 				}
