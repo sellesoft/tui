@@ -140,6 +140,32 @@ void set_cell(u32 x, u32 y, u32 codepoint, u32 bg, u32 fg){
 	terminal->cells[cell_index].fg = fg;
 }
 
+void hide_cursor(){
+	CONSOLE_CURSOR_INFO cci;
+	if(!GetConsoleCursorInfo(terminal->out_pipe, &cci)){
+		printlasterr(L"GetConsoleCursorInfo");
+		return;
+	}
+	cci.bVisible = FALSE;
+	if(!SetConsoleCursorInfo(terminal->out_pipe, &cci)){
+		printlasterr(L"SetConsoleCursorInfo");
+		return;
+	}
+}
+
+void show_cursor(){
+	CONSOLE_CURSOR_INFO cci;
+	if(!GetConsoleCursorInfo(terminal->out_pipe, &cci)){
+		printlasterr(L"GetConsoleCursorInfo");
+		return;
+	}
+	cci.bVisible = TRUE;
+	if(!SetConsoleCursorInfo(terminal->out_pipe, &cci)){
+		printlasterr(L"SetConsoleCursorInfo");
+		return;
+	}
+}
+
 void clear_terminal(){
 	Log("clear_terminal()");
 	COORD coords = {0};
@@ -244,7 +270,6 @@ void resize_terminal(u32 new_width, u32 new_height){
 
 	//readjust positioning of panels
 	
-	terminal->dirty  = true;
 	terminal->width  = new_width;
     terminal->height = new_height;
 	terminal->cells  = new_cells;
@@ -258,6 +283,7 @@ int main(int argc, char** argv){
 
 	//// init ////
 	log_file = fopen("log.txt", "w+");
+	setvbuf(log_file,0,_IONBF,0);
 	Log("init");
 
 	terminal = calloc(1, sizeof(Terminal));
@@ -305,20 +331,20 @@ int main(int argc, char** argv){
 
 	clear_terminal();
 	draw_terminal();
-	
+	hide_cursor();
 
 	//// update ////
 	Log("update");
 	while(!terminal->quit){
 		INPUT_RECORD records[5] = {0};
-		u32 nread;
-		u32 ninputs;
+		u32 ninputs = 0;
 		if(!GetNumberOfConsoleInputEvents(terminal->in_pipe, &ninputs)){
 			printlasterr(L"ReadConsoleInput");
 			SetConsoleMode(terminal->in_pipe, restore_console_mode);
 			return 0;
 		}
 
+		u32 nread = 0;
 		if(1||ninputs){
 			if(!ReadConsoleInput(terminal->in_pipe, records, 5, &nread)){
 				printlasterr(L"ReadConsoleInput");
@@ -374,6 +400,7 @@ int main(int argc, char** argv){
 				case WINDOW_BUFFER_SIZE_EVENT:{
 					WINDOW_BUFFER_SIZE_RECORD rec = ir.Event.WindowBufferSizeEvent;
 					resize_terminal(rec.dwSize.X, rec.dwSize.Y);
+					terminal->dirty = true;
 				}break;
 			}
 		}
@@ -384,9 +411,10 @@ int main(int argc, char** argv){
 			draw_terminal();
 		}
 	}
-	
+
 	fclose(log_file);
 	clear_terminal();
+	show_cursor();
 	SetConsoleMode(terminal->in_pipe, restore_console_mode);
 	return 0;
 }
