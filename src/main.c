@@ -287,9 +287,9 @@ void draw_terminal(){
 			//write foreground
 			u32 cw = swprintf(temp, 50, 
 				L"%03u;%03u;%03u",
-				(terminal->cells[i].fg&0xff0000)>>16,
-				(terminal->cells[i].fg&0x00ff00)>> 8,
-				(terminal->cells[i].fg&0x0000ff)>> 0
+				(terminal->cells[i].fg&0xff000000)>>24,
+				(terminal->cells[i].fg&0x00ff0000)>>16,
+				(terminal->cells[i].fg&0x0000ff00)>> 8
 			);
 			memcpy(cur, temp, cw*sizeof(wchar));
 			//write background
@@ -394,7 +394,7 @@ int main(int argc, char** argv){
 
 	terminal = calloc(1, sizeof(Terminal));
 	terminal->ascii = false;
-	terminal->default_fg = 0xaaffaaff;
+	terminal->default_fg = 0xffffffff;
 	terminal->default_bg = 0x00000000;
 	terminal->dirty      = false;
 	arrinit(terminal->panels, 4);
@@ -435,7 +435,6 @@ int main(int argc, char** argv){
 	Log("update");
 	while(!terminal->quit){
 		INPUT_RECORD records[5] = {0};
-		terminal->dirty = 1;
 		u32 ninputs = 0;
 		if(!GetNumberOfConsoleInputEvents(terminal->in_pipe, &ninputs)){
 			printlasterr(L"ReadConsoleInput");
